@@ -2,6 +2,7 @@
 Dashboard Monitoring Stunting - Versi Profesional
 Sistem Monitoring Stunting Terintegrasi Berbasis Web dan Data Analytics
 Data dari Supabase | Standar WHO 2006
+Fix: Pagination untuk mengambil semua data (>1000 baris)
 """
 
 import streamlit as st
@@ -131,15 +132,48 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
 # ============================================================
+# FUNGSI PAGINATION - AMBIL SEMUA DATA DARI SUPABASE
+# ============================================================
+def fetch_all(supabase, table):
+    """
+    Mengambil SEMUA data dari tabel Supabase menggunakan pagination.
+    Mengatasi batas default 1000 baris dari Supabase.
+    """
+    all_data = []
+    page_size = 1000
+    offset = 0
+
+    while True:
+        res = (
+            supabase.table(table)
+            .select("*")
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        batch = res.data
+        all_data.extend(batch)
+
+        # Jika data yang dikembalikan kurang dari page_size,
+        # berarti sudah sampai halaman terakhir
+        if len(batch) < page_size:
+            break
+
+        offset += page_size
+
+    return all_data
+
+
+# ============================================================
 # LOAD DATA DARI SUPABASE
 # ============================================================
 @st.cache_data(ttl=300)
 def load_data():
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-    anak       = supabase.table("anak").select("*").execute().data
-    pengukuran = supabase.table("pengukuran").select("*").execute().data
-    status     = supabase.table("status_stunting").select("*").execute().data
+    # ✅ Gunakan fetch_all() agar semua data terambil (bukan hanya 1000 baris)
+    anak       = fetch_all(supabase, "anak")
+    pengukuran = fetch_all(supabase, "pengukuran")
+    status     = fetch_all(supabase, "status_stunting")
 
     df_anak       = pd.DataFrame(anak)
     df_pengukuran = pd.DataFrame(pengukuran)
@@ -162,8 +196,8 @@ def load_data():
     df["Usia_Bulan"] = df["Usia_Bulan"].astype(int)
 
     WHO_MEDIAN = {
-        36:95.2, 37:96.1, 38:97.0, 39:97.9, 40:98.7,
-        41:99.5, 42:100.3, 43:101.0, 44:101.8, 45:102.5,
+        36:95.2,  37:96.1,  38:97.0,  39:97.9,  40:98.7,
+        41:99.5,  42:100.3, 43:101.0, 44:101.8, 45:102.5,
         46:103.2, 47:103.9, 48:104.6, 49:105.2, 50:105.9,
         51:106.5, 52:107.2, 53:107.8, 54:108.4, 55:109.0,
         56:109.6, 57:110.2, 58:110.8, 59:111.3, 60:111.9
