@@ -132,48 +132,15 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
 # ============================================================
-# FUNGSI PAGINATION - AMBIL SEMUA DATA DARI SUPABASE
-# ============================================================
-def fetch_all(supabase, table):
-    """
-    Mengambil SEMUA data dari tabel Supabase menggunakan pagination.
-    Mengatasi batas default 1000 baris dari Supabase.
-    """
-    all_data = []
-    page_size = 1000
-    offset = 0
-
-    while True:
-        res = (
-            supabase.table(table)
-            .select("*")
-            .range(offset, offset + page_size - 1)
-            .execute()
-        )
-        batch = res.data
-        all_data.extend(batch)
-
-        # Jika data yang dikembalikan kurang dari page_size,
-        # berarti sudah sampai halaman terakhir
-        if len(batch) < page_size:
-            break
-
-        offset += page_size
-
-    return all_data
-
-
-# ============================================================
 # LOAD DATA DARI SUPABASE
 # ============================================================
 @st.cache_data(ttl=300)
 def load_data():
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-    # ✅ Gunakan fetch_all() agar semua data terambil (bukan hanya 1000 baris)
-    anak       = fetch_all(supabase, "anak")
-    pengukuran = fetch_all(supabase, "pengukuran")
-    status     = fetch_all(supabase, "status_stunting")
+    anak       = supabase.table("anak").select("*").execute().data
+    pengukuran = supabase.table("pengukuran").select("*").execute().data
+    status     = supabase.table("status_stunting").select("*").execute().data
 
     df_anak       = pd.DataFrame(anak)
     df_pengukuran = pd.DataFrame(pengukuran)
@@ -181,6 +148,12 @@ def load_data():
 
     df = df_pengukuran.merge(df_anak, on="id_anak", how="left")
     df = df.merge(df_status, on="id_pengukuran", how="left")
+
+    if df.empty:
+        return pd.DataFrame(columns=[
+            "Nama", "Usia_Bulan", "Berat_Kg", "Tinggi_Cm", "LiLA_Cm",
+            "Status_Stunting", "Keterangan", "Z_Score", "Status_Gizi", "BMI"
+    ])
 
     df = df.rename(columns={
         "nama"           : "Nama",
@@ -195,6 +168,7 @@ def load_data():
     df = df.dropna(subset=["Usia_Bulan", "Berat_Kg", "Tinggi_Cm"])
     df["Usia_Bulan"] = df["Usia_Bulan"].astype(int)
 
+    
     WHO_MEDIAN = {
         36:95.2,  37:96.1,  38:97.0,  39:97.9,  40:98.7,
         41:99.5,  42:100.3, 43:101.0, 44:101.8, 45:102.5,
@@ -229,6 +203,8 @@ with st.spinner("⏳ Memuat data dari Supabase..."):
     except Exception as e:
         st.error(f"❌ Gagal memuat data: {e}")
         st.stop()
+    if df.empty:
+        st.warning("Data Supabase kosong. Dashboard akan ditampilkan tanpa data.")
 
 # ============================================================
 # SIDEBAR
@@ -240,8 +216,17 @@ with st.sidebar:
     st.divider()
 
     st.markdown("### 🔍 Filter Data")
-    usia_min = int(df["Usia_Bulan"].min())
-    usia_max = int(df["Usia_Bulan"].max())
+    if df.empty:
+        usia_min, usia_max = 0, 120
+    else:
+        usia_min = int(df["Usia_Bulan"].min())
+        usia_max = int(df["Usia_Bulan"].max())
+    
+    # Jika hanya satu usia, beri buffer ±5 bulan
+    if usia_min == usia_max:
+        usia_min = max(0, usia_min - 5)
+        usia_max = usia_max + 5
+
     usia_range = st.slider("Rentang Usia (Bulan)", usia_min, usia_max, (usia_min, usia_max))
 
     status_options = ["Semua"] + sorted(df["Status_Stunting"].dropna().unique().tolist())
@@ -283,6 +268,9 @@ df_filtered = df[
 ]
 if filter_status != "Semua":
     df_filtered = df_filtered[df_filtered["Status_Stunting"] == filter_status]
+
+if df_filtered.empty:
+    st.info("Belum ada data, tambahkan data baru di Supabase.")
 
 # ============================================================
 # HEADER UTAMA
